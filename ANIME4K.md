@@ -23,7 +23,7 @@ The video path is NVDEC → system memory → Vulkan/libplacebo Anime4K → subt
 docker buildx build \
   --platform linux/amd64 \
   --file Dockerfile.anime4k \
-  --tag ghcr.io/yangkeao/anime4k-jellyfin:10.11.11-1 \
+  --tag ghcr.io/yangkeao/anime4k-jellyfin:10.11.11-2 \
   .
 ```
 

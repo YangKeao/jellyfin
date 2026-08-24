@@ -3973,6 +3973,10 @@ namespace MediaBrowser.Controller.MediaEncoding
                     mainFilters.Add($"transpose_cuda=dir={transposeDirection}");
                 }
 
+                // NVDEC exposes 8-bit sources as NV12 and 10-bit sources as P010.
+                // Normalize the CUDA surface before downloading it to system memory;
+                // hwdownload cannot convert P010 directly to yuv420p.
+                mainFilters.Add("scale_cuda=format=yuv420p");
                 mainFilters.Add("hwdownload");
             }
             else if (state.DeInterlace("h264", true)
