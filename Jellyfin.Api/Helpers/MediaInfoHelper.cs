@@ -12,12 +12,14 @@ using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Database.Implementations.Enums;
 using Jellyfin.Extensions;
+using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Extensions;
 using MediaBrowser.Common.Net;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Devices;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Audio;
+using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Model.Dlna;
@@ -212,6 +214,24 @@ public class MediaInfoHelper
 
         var user = _userManager.GetUserById(userId) ?? throw new ResourceNotFoundException();
 
+        var encodingOptions = _serverConfigurationManager.GetEncodingOptions();
+        var series = item is Episode episode ? episode.Series : null;
+        var anime4KWidth = 0;
+        var anime4KHeight = 0;
+        var enableAnime4K = enableTranscoding
+            && encodingOptions.EnableAnime4K
+            && encodingOptions.HardwareAccelerationType == HardwareAccelerationType.nvenc
+            && Anime4KHelper.IsRuntimeAvailable
+            && item is Video
+            && Anime4KHelper.IsAnimation(item, series)
+            && Anime4KHelper.TryGetTargetSize(mediaSource, out anime4KWidth, out anime4KHeight);
+
+        if (enableAnime4K)
+        {
+            mediaSource.SupportsDirectPlay = false;
+            mediaSource.SupportsDirectStream = false;
+        }
+
         if (!enableDirectPlay)
         {
             mediaSource.SupportsDirectPlay = false;
@@ -261,6 +281,26 @@ public class MediaInfoHelper
         {
             streamInfo.PlaySessionId = playSessionId;
             streamInfo.StartPositionTicks = startTimeTicks;
+
+            if (enableAnime4K)
+            {
+                streamInfo.PlayMethod = PlayMethod.Transcode;
+                streamInfo.MaxWidth = anime4KWidth;
+                streamInfo.MaxHeight = anime4KHeight;
+                streamInfo.SetOption("anime4k", "true");
+                streamInfo.SetOption("allowVideoStreamCopy", "false");
+
+                var anime4KBitrateCap = streamInfo.VideoCodecs.Contains("hevc", StringComparer.OrdinalIgnoreCase)
+                    ? 20_000_000
+                    : 35_000_000;
+                streamInfo.VideoBitrate = Math.Min(streamInfo.VideoBitrate ?? anime4KBitrateCap, anime4KBitrateCap);
+
+                _logger.LogInformation(
+                    "Anime4K enabled for {ItemId}: {Width}x{Height}, profile Mode A (Fast)",
+                    item.Id,
+                    anime4KWidth,
+                    anime4KHeight);
+            }
 
             mediaSource.SupportsDirectPlay = streamInfo.PlayMethod == PlayMethod.DirectPlay;
 

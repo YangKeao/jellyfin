@@ -54,6 +54,7 @@ public class EncodingOptions
         EnableIntelLowPowerH264HwEncoder = false;
         EnableIntelLowPowerHevcHwEncoder = false;
         EnableHardwareEncoding = true;
+        EnableAnime4K = false;
         AllowHevcEncoding = false;
         AllowAv1Encoding = false;
         EnableSubtitleExtraction = true;
@@ -270,6 +271,11 @@ public class EncodingOptions
     /// Gets or sets a value indicating whether hardware encoding is enabled.
     /// </summary>
     public bool EnableHardwareEncoding { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether eligible animation is automatically upscaled with Anime4K.
+    /// </summary>
+    public bool EnableAnime4K { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether HEVC encoding is enabled.

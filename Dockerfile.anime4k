@@ -1,0 +1,52 @@
+# syntax=docker/dockerfile:1.7
+
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS server-build
+WORKDIR /src
+COPY . .
+RUN dotnet publish Jellyfin.Server/Jellyfin.Server.csproj \
+    --configuration Release \
+    --output /out \
+    --runtime linux-x64 \
+    --self-contained true \
+    -p:DebugSymbols=false \
+    -p:DebugType=None
+
+FROM node:22-bookworm AS web-build
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+RUN git clone --branch v10.11.11 --depth 1 https://github.com/jellyfin/jellyfin-web.git .
+COPY build/anime4k/web-patches /tmp/web-patches
+RUN git apply /tmp/web-patches/*.patch \
+    && npm ci \
+    && npm run build:production
+
+FROM alpine:3.22 AS shader-build
+RUN apk add --no-cache git
+WORKDIR /src
+RUN git clone --branch v4.0.1 --depth 1 https://github.com/bloc97/Anime4K.git . \
+    && mkdir -p /out \
+    && cat \
+        glsl/Restore/Anime4K_Clamp_Highlights.glsl \
+        glsl/Restore/Anime4K_Restore_CNN_M.glsl \
+        glsl/Upscale/Anime4K_Upscale_CNN_x2_M.glsl \
+        glsl/Upscale/Anime4K_AutoDownscalePre_x2.glsl \
+        glsl/Upscale/Anime4K_AutoDownscalePre_x4.glsl \
+        glsl/Upscale/Anime4K_Upscale_CNN_x2_S.glsl \
+        > /out/Anime4K_ModeA_Fast.glsl \
+    && cp LICENSE /out/Anime4K-LICENSE
+
+FROM jellyfin/jellyfin:10.11.11@sha256:aefb67e6a7ff1debdd154a78a7bbb780fd0c873d8639210a7f6a2016ad2b35db
+USER root
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends libvulkan1 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=server-build /out/ /jellyfin/
+COPY --from=web-build /src/dist/ /jellyfin/jellyfin-web/
+COPY --from=shader-build /out/ /usr/share/anime4k/
+COPY build/anime4k/anime4k-entrypoint.sh /usr/local/bin/anime4k-entrypoint
+RUN chmod 0755 /usr/local/bin/anime4k-entrypoint
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,video,utility,graphics \
+    JELLYFIN_ANIME4K_SHADER=/usr/share/anime4k/Anime4K_ModeA_Fast.glsl
+ENTRYPOINT ["/usr/local/bin/anime4k-entrypoint"]

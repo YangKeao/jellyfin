@@ -1,0 +1,160 @@
+From d1832e7bf62c44fd4a51c2480db1665c1a81c1cc Mon Sep 17 00:00:00 2001
+From: Yang Keao <yangkeao@chunibyo.icu>
+Date: Tue, 25 Aug 2026 01:01:52 +0800
+Subject: [PATCH] Add Anime4K transcoding controls
+
+---
+ .../dashboard/routes/playback/transcoding.tsx | 58 ++++++++++++++++++-
+ src/strings/en-us.json                        |  3 +
+ src/strings/zh-cn.json                        |  3 +
+ 3 files changed, 62 insertions(+), 2 deletions(-)
+
+diff --git a/src/apps/dashboard/routes/playback/transcoding.tsx b/src/apps/dashboard/routes/playback/transcoding.tsx
+index 482b34b..d774a6e 100644
+--- a/src/apps/dashboard/routes/playback/transcoding.tsx
++++ b/src/apps/dashboard/routes/playback/transcoding.tsx
+@@ -32,6 +32,20 @@ import SimpleAlert from 'components/SimpleAlert';
+ 
+ const CONFIG_KEY = 'encoding';
+ 
++type Anime4KEncodingOptions = EncodingOptions & {
++    EnableAnime4K?: boolean;
++};
++
++interface Anime4KStatus {
++    Configured: boolean;
++    Available: boolean;
++    Effective: boolean;
++    Profile: string;
++    ShaderVersion: string;
++    Target: string;
++    Reason: string;
++}
++
+ export const action = async ({ request }: ActionFunctionArgs) => {
+     const api = ServerConnections.getCurrentApi();
+     if (!api) throw new Error('No Api instance available');
+@@ -51,8 +65,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
+ };
+ 
+ export const Component = () => {
+-    const { data: initialConfig, isPending, isError } = useNamedConfiguration<EncodingOptions>(CONFIG_KEY);
+-    const [ config, setConfig ] = useState<EncodingOptions | null>(null);
++    const { data: initialConfig, isPending, isError } = useNamedConfiguration<Anime4KEncodingOptions>(CONFIG_KEY);
++    const [ config, setConfig ] = useState<Anime4KEncodingOptions | null>(null);
++    const [ anime4KStatus, setAnime4KStatus ] = useState<Anime4KStatus | null>(null);
+     const navigation = useNavigation();
+     const actionData = useActionData() as ActionData | undefined;
+     const submit = useSubmit();
+@@ -65,6 +80,25 @@ export const Component = () => {
+         }
+     }, [ initialConfig, config ]);
+ 
++    useEffect(() => {
++        const api = ServerConnections.getCurrentApi();
++        if (!api) return;
++
++        let active = true;
++        void api.axiosInstance
++            .get<Anime4KStatus>('/System/Anime4K/Status')
++            .then(response => {
++                if (active) setAnime4KStatus(response.data);
++            })
++            .catch(() => {
++                if (active) setAnime4KStatus(null);
++            });
++
++        return () => {
++            active = false;
++        };
++    }, [ initialConfig ]);
++
+     const onConfigChange = useCallback((e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+         setConfig({
+             ...config,
+@@ -183,6 +217,26 @@ export const Component = () => {
+                                 </Alert>
+                             )}
+ 
++                            <FormControl variant='standard'>
++                                <Typography variant='h3'>{globalize.translate('Anime4KUpscaling')}</Typography>
++                                <FormControlLabel
++                                    label={globalize.translate('EnableAnime4K')}
++                                    control={
++                                        <Checkbox
++                                            name='EnableAnime4K'
++                                            checked={config.EnableAnime4K ?? false}
++                                            onChange={onCheckboxChange}
++                                        />
++                                    }
++                                />
++                                <FormHelperText>{globalize.translate('EnableAnime4KHelp')}</FormHelperText>
++                                {anime4KStatus && (
++                                    <Alert severity={anime4KStatus.Effective ? 'success' : (config.EnableAnime4K ? 'warning' : 'info')}>
++                                        {anime4KStatus.Reason} ({anime4KStatus.Profile}, {anime4KStatus.Target}, Anime4K {anime4KStatus.ShaderVersion})
++                                    </Alert>
++                                )}
++                            </FormControl>
++
+                             <TextField
+                                 name='HardwareAccelerationType'
+                                 select
+diff --git a/src/strings/en-us.json b/src/strings/en-us.json
+index 28fbf0b..99b6582 100644
+--- a/src/strings/en-us.json
++++ b/src/strings/en-us.json
+@@ -1743,6 +1743,7 @@
+     "PreferFmp4HlsContainer": "Prefer fMP4-HLS Media Container",
+     "PreferFmp4HlsContainerHelp": "Prefer to use fMP4 as the default container for HLS, making it possible to direct stream HEVC and AV1 content on supported devices.",
+     "AllowHevcEncoding": "Allow encoding in HEVC format",
++    "Anime4KUpscaling": "Anime4K upscaling",
+     "LabelAllowedAudioChannels": "Maximum Allowed Audio Channels",
+     "LabelSelectAudioChannels": "Channels",
+     "LabelSelectMono": "Mono",
+@@ -1754,6 +1755,7 @@
+     "MessageChromecastConnectionError": "Your Google Cast receiver is unable to contact the Jellyfin server. Please check the connection and try again.",
+     "MessagePlaybackError": "There was an error playing this file on your Google Cast receiver.",
+     "EnableEnhancedNvdecDecoder": "Enable enhanced NVDEC decoder",
++    "EnableAnime4K": "Automatically upscale eligible animation with Anime4K",
+     "EnableVppTonemapping": "Enable VPP Tone mapping",
+     "AllowVppTonemappingHelp": "Full Intel driver based tone-mapping. Currently works only on certain hardware with HDR10 videos. This has a higher priority compared to another OpenCL implementation.",
+     "EnableVideoToolboxTonemapping": "Enable VideoToolbox Tone mapping",
+@@ -1807,6 +1809,7 @@
+     "ThemeSong": "Theme Song",
+     "ThemeVideo": "Theme Video",
+     "EnableEnhancedNvdecDecoderHelp": "Enhanced NVDEC implementation, disable this option to use CUVID if you encounter decoding errors.",
++    "EnableAnime4KHelp": "Applies Anime4K Mode A (Fast) to local SDR animation at 30 fps or below and below 4K. The Anime4K tag forces inclusion; NoAnime4K always disables it. Changes affect new playback sessions.",
+     "EnableSplashScreen": "Enable the splash screen image",
+     "LabelVppTonemappingBrightness": "VPP Tone mapping brightness gain",
+     "LabelVppTonemappingBrightnessHelp": "Apply brightness gain in VPP tone mapping. The recommended value is 16.",
+diff --git a/src/strings/zh-cn.json b/src/strings/zh-cn.json
+index 54c76e7..82a6902 100644
+--- a/src/strings/zh-cn.json
++++ b/src/strings/zh-cn.json
+@@ -1452,6 +1452,7 @@
+     "PreferFmp4HlsContainer": "优先使用 fMP4-HLS 媒体容器",
+     "PreferFmp4HlsContainerHelp": "优先使用 fMP4 作为 HLS 播放的默认容器，从而可以在支持的设备上直接串流 HEVC 和 AV1 格式的内容。",
+     "AllowHevcEncoding": "允许以 HEVC 格式编码",
++    "Anime4KUpscaling": "Anime4K 超分辨率",
+     "LabelAllowedAudioChannels": "允许的最大声道数量",
+     "LabelSelectAudioChannels": "声道",
+     "LabelSelectMono": "单声道",
+@@ -1505,6 +1506,7 @@
+     "MessagePlaybackError": "在您的 Google Cast 接收器上播放此文件时发生错误。",
+     "MessageChromecastConnectionError": "您的 Google Cast 接收器无法联系 Jellyfin 服务器。请检查连接，然后重试。",
+     "EnableEnhancedNvdecDecoder": "启用增强的 NVDEC 解码器",
++    "EnableAnime4K": "自动用 Anime4K 放大符合条件的动画",
+     "EnableVppTonemapping": "启用 VPP 色调映射",
+     "AllowVppTonemappingHelp": "完全基于 Intel 驱动的色调映射。目前仅对部分硬件和 HDR10 视频生效。此项比另一个 OpenCL 实现具有更高的优先级。",
+     "DisablePlugin": "禁用",
+@@ -1650,6 +1652,7 @@
+     "Digital": "数字",
+     "MessageUnauthorizedUser": "您目前无权访问服务器。请联系您的服务器管理员以获取更多信息。",
+     "EnableEnhancedNvdecDecoderHelp": "增强的 NVDEC 实现，如果遇到解码错误，请禁用此选项以使用 CUVID。",
++    "EnableAnime4KHelp": "对低于 4K、30 fps 或以下的本地 SDR 动画应用 Anime4K Mode A（Fast）。Anime4K 标签强制启用，NoAnime4K 标签始终禁用。改动只影响新播放会话。",
+     "HomeVideosPhotos": "家庭视频和照片",
+     "Bold": "粗体",
+     "LabelTextWeight": "文本粗细",
+-- 
+2.55.0
+

@@ -1138,8 +1138,16 @@ namespace MediaBrowser.Controller.MediaEncoding
                     return string.Empty;
                 }
 
-                args.Append(GetCudaDeviceArgs(0, CudaAlias))
-                     .Append(GetFilterHwDeviceArgs(CudaAlias));
+                args.Append(GetCudaDeviceArgs(0, CudaAlias));
+                if (IsAnime4KRequested(state, options))
+                {
+                    args.Append(GetVulkanDeviceArgs(0, null, null, VulkanAlias))
+                        .Append(GetFilterHwDeviceArgs(VulkanAlias));
+                }
+                else
+                {
+                    args.Append(GetFilterHwDeviceArgs(CudaAlias));
+                }
             }
             else if (optHwaccelType == HardwareAccelerationType.amf)
             {
@@ -3897,6 +3905,11 @@ namespace MediaBrowser.Controller.MediaEncoding
             var isSwDecoder = string.IsNullOrEmpty(vidDecoder);
             var isSwEncoder = !vidEncoder.Contains("nvenc", StringComparison.OrdinalIgnoreCase);
 
+            if (IsAnime4KRequested(state, options))
+            {
+                return GetAnime4KNvidiaVidFilterChain(state, options, vidDecoder, vidEncoder);
+            }
+
             // legacy cuvid pipeline(copy-back)
             if ((isSwDecoder && isSwEncoder)
                 || !IsCudaFullSupported()
@@ -3907,6 +3920,115 @@ namespace MediaBrowser.Controller.MediaEncoding
 
             // preferred nvdec/cuvid + cuda filters + nvenc pipeline
             return GetNvidiaVidFiltersPrefered(state, options, vidDecoder, vidEncoder);
+        }
+
+        private static bool IsAnime4KRequested(EncodingJobInfo state, EncodingOptions options)
+            => options.EnableAnime4K
+               && Anime4KHelper.IsRuntimeAvailable
+               && bool.TryParse(state.BaseRequest.GetOption("anime4k"), out var enabled)
+               && enabled;
+
+        private (List<string> MainFilters, List<string> SubFilters, List<string> OverlayFilters) GetAnime4KNvidiaVidFilterChain(
+            EncodingJobInfo state,
+            EncodingOptions options,
+            string vidDecoder,
+            string vidEncoder)
+        {
+            var inputWidth = state.VideoStream?.Width;
+            var inputHeight = state.VideoStream?.Height;
+            var requestedWidth = state.BaseRequest.Width;
+            var requestedHeight = state.BaseRequest.Height;
+            var requestedMaxWidth = state.BaseRequest.MaxWidth;
+            var requestedMaxHeight = state.BaseRequest.MaxHeight;
+            var outputWidth = requestedMaxWidth ?? state.OutputWidth ?? Anime4KHelper.TargetWidth;
+            var outputHeight = requestedMaxHeight ?? state.OutputHeight ?? Anime4KHelper.TargetHeight;
+            var isCudaDecoder = vidDecoder.Contains("cuda", StringComparison.OrdinalIgnoreCase);
+            var isNvencEncoder = vidEncoder.Contains("nvenc", StringComparison.OrdinalIgnoreCase);
+            var hasSubtitles = state.SubtitleStream is not null && ShouldEncodeSubtitle(state);
+            var hasTextSubtitles = hasSubtitles && state.SubtitleStream.IsTextSubtitleStream;
+            var hasGraphicalSubtitles = hasSubtitles && !state.SubtitleStream.IsTextSubtitleStream;
+            var rotation = state.VideoStream?.Rotation ?? 0;
+            var transposeDirection = rotation == 0 ? string.Empty : GetVideoTransposeDirection(state);
+            var swapWidthAndHeight = Math.Abs(rotation) == 90;
+            var orientedInputWidth = swapWidthAndHeight ? inputHeight : inputWidth;
+            var orientedInputHeight = swapWidthAndHeight ? inputWidth : inputHeight;
+
+            var mainFilters = new List<string>
+            {
+                GetOverwriteColorPropertiesParam(state, false)
+            };
+
+            if (isCudaDecoder)
+            {
+                if (state.DeInterlace("h264", true)
+                    || state.DeInterlace("avc", true)
+                    || state.DeInterlace("h265", true)
+                    || state.DeInterlace("hevc", true))
+                {
+                    mainFilters.Add(GetHwDeinterlaceFilter(state, options, "cuda"));
+                }
+
+                if (!string.IsNullOrEmpty(transposeDirection) && _mediaEncoder.SupportsFilter("transpose_cuda"))
+                {
+                    mainFilters.Add($"transpose_cuda=dir={transposeDirection}");
+                }
+
+                mainFilters.Add("hwdownload");
+            }
+            else if (state.DeInterlace("h264", true)
+                     || state.DeInterlace("avc", true)
+                     || state.DeInterlace("h265", true)
+                     || state.DeInterlace("hevc", true))
+            {
+                mainFilters.Add(GetSwDeinterlaceFilter(state, options));
+            }
+
+            mainFilters.Add("format=yuv420p");
+            mainFilters.Add("hwupload");
+            mainFilters.Add(string.Format(
+                CultureInfo.InvariantCulture,
+                "libplacebo=w={0}:h={1}:custom_shader_path={2}",
+                outputWidth,
+                outputHeight,
+                Anime4KHelper.ShaderPath));
+            mainFilters.Add("hwdownload");
+            mainFilters.Add("format=yuv420p");
+
+            var subFilters = new List<string>();
+            var overlayFilters = new List<string>();
+            if (hasTextSubtitles)
+            {
+                mainFilters.Add(GetTextSubtitlesFilter(state, false, false));
+            }
+            else if (hasGraphicalSubtitles)
+            {
+                var subtitleWidth = state.SubtitleStream?.Width;
+                var subtitleHeight = state.SubtitleStream?.Height;
+                subFilters.Add(GetGraphicalSubPreProcessFilters(
+                    orientedInputWidth,
+                    orientedInputHeight,
+                    subtitleWidth,
+                    subtitleHeight,
+                    requestedWidth,
+                    requestedHeight,
+                    requestedMaxWidth,
+                    requestedMaxHeight));
+                overlayFilters.Add("overlay=eof_action=pass:repeatlast=0");
+            }
+
+            if (isNvencEncoder)
+            {
+                if (hasGraphicalSubtitles)
+                {
+                    overlayFilters.Add("hwupload_cuda=device=0");
+                }
+                else
+                {
+                    mainFilters.Add("hwupload_cuda=device=0");
+                }
+            }
+
+            return (mainFilters, subFilters, overlayFilters);
         }
 
         public (List<string> MainFilters, List<string> SubFilters, List<string> OverlayFilters) GetNvidiaVidFiltersPrefered(
