@@ -27,7 +27,7 @@ docker buildx build \
   .
 ```
 
-The image pins Jellyfin 10.11.11, Jellyfin Web 10.11.11, and Anime4K 4.0.1. It installs Debian's Vulkan loader because the FFmpeg-bundled loader does not initialize the RTX 2070 SUPER correctly in this deployment.
+The image pins Jellyfin 10.11.11, Jellyfin Web 10.11.11, and Anime4K 4.0.1. It installs Debian's Vulkan loader and EGL runtime because the FFmpeg-bundled loader does not initialize the RTX 2070 SUPER correctly in this deployment and NVIDIA's Vulkan ICD requires EGL at runtime.
 
 ## Runtime status
 
