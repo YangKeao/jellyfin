@@ -40,7 +40,7 @@ RUN git clone --branch v4.0.1 --depth 1 https://github.com/bloc97/Anime4K.git . 
 FROM jellyfin/jellyfin:10.11.11@sha256:aefb67e6a7ff1debdd154a78a7bbb780fd0c873d8639210a7f6a2016ad2b35db
 USER root
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends libvulkan1 \
+    && apt-get install --yes --no-install-recommends libegl1 libvulkan1 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=server-build /out/ /jellyfin/
 COPY --from=web-build /src/dist/ /jellyfin/jellyfin-web/
