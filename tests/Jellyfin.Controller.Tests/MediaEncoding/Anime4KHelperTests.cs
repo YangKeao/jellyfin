@@ -1,5 +1,6 @@
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.MediaEncoding;
+using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.MediaInfo;
@@ -9,6 +10,42 @@ namespace Jellyfin.Controller.Tests.MediaEncoding;
 
 public class Anime4KHelperTests
 {
+    [Theory]
+    [InlineData(Anime4KQualityProfile.Balanced, 21, "p4", null)]
+    [InlineData(Anime4KQualityProfile.High, 19, "p5", "qres")]
+    [InlineData(Anime4KQualityProfile.Maximum, 17, "p6", "fullres")]
+    public void GetEncoderSettings_MapsProfile(
+        Anime4KQualityProfile profile,
+        int expectedCq,
+        string expectedPreset,
+        string? expectedMultipass)
+    {
+        var settings = Anime4KHelper.GetEncoderSettings(profile);
+
+        Assert.Equal(expectedCq, settings.ConstantQuality);
+        Assert.Equal(expectedPreset, settings.Preset);
+        Assert.Equal(expectedMultipass, settings.Multipass);
+    }
+
+    [Theory]
+    [InlineData(0, Anime4KHelper.DefaultMaxBitrate)]
+    [InlineData(1_000_000, Anime4KHelper.MinMaxBitrate)]
+    [InlineData(90_000_000, 90_000_000)]
+    [InlineData(300_000_000, Anime4KHelper.MaxMaxBitrate)]
+    public void NormalizeMaxBitrate_UsesDefaultAndBounds(int input, int expected)
+        => Assert.Equal(expected, Anime4KHelper.NormalizeMaxBitrate(input));
+
+    [Theory]
+    [InlineData(80_000_000, null, 192_000, 80_000_000)]
+    [InlineData(80_000_000, 20_000_000, 192_000, 19_808_000)]
+    [InlineData(80_000_000, 100_000_000, 192_000, 80_000_000)]
+    public void GetSessionVideoBitrate_RespectsAdminAndSessionCeilings(
+        int configured,
+        int? session,
+        int audio,
+        int expected)
+        => Assert.Equal(expected, Anime4KHelper.GetSessionVideoBitrate(configured, session, audio));
+
     [Fact]
     public void IsAnimation_InheritsSeriesGenre()
     {

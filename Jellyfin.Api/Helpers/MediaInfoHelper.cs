@@ -290,16 +290,24 @@ public class MediaInfoHelper
                 streamInfo.SetOption("anime4k", "true");
                 streamInfo.SetOption("allowVideoStreamCopy", "false");
 
-                var anime4KBitrateCap = streamInfo.VideoCodecs.Contains("hevc", StringComparer.OrdinalIgnoreCase)
-                    ? 20_000_000
-                    : 35_000_000;
-                streamInfo.VideoBitrate = Math.Min(streamInfo.VideoBitrate ?? anime4KBitrateCap, anime4KBitrateCap);
+                var configuredMaxBitrate = Anime4KHelper.NormalizeMaxBitrate(encodingOptions.Anime4KMaxBitrate);
+                streamInfo.VideoBitrate = Anime4KHelper.GetSessionVideoBitrate(
+                    configuredMaxBitrate,
+                    options.MaxBitrate,
+                    streamInfo.AudioBitrate);
+                streamInfo.SetOption("anime4kMaxBitrate", configuredMaxBitrate.ToString(CultureInfo.InvariantCulture));
+
+                var encoderSettings = Anime4KHelper.GetEncoderSettings(encodingOptions.Anime4KQuality);
 
                 _logger.LogInformation(
-                    "Anime4K enabled for {ItemId}: {Width}x{Height}, profile Mode A (Fast)",
+                    "Anime4K enabled for {ItemId}: {Width}x{Height}, quality {Quality} (CQ {ConstantQuality}, {Preset}), video bitrate ceiling {VideoBitrate} bps",
                     item.Id,
                     anime4KWidth,
-                    anime4KHeight);
+                    anime4KHeight,
+                    encodingOptions.Anime4KQuality,
+                    encoderSettings.ConstantQuality,
+                    encoderSettings.Preset,
+                    streamInfo.VideoBitrate);
             }
 
             mediaSource.SupportsDirectPlay = streamInfo.PlayMethod == PlayMethod.DirectPlay;

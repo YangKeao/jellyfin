@@ -1676,6 +1676,28 @@ namespace MediaBrowser.Controller.MediaEncoding
             return FormattableString.Invariant($" -b:v {bitrate} -maxrate {bitrate} -bufsize {bufsize}");
         }
 
+        private static string GetAnime4KVideoQualityParam(EncodingJobInfo state, EncodingOptions encodingOptions)
+        {
+            var settings = Anime4KHelper.GetEncoderSettings(encodingOptions.Anime4KQuality);
+            var param = FormattableString.Invariant(
+                $" -preset {settings.Preset} -tune hq -rc vbr -cq {settings.ConstantQuality} -b:v 0");
+
+            if (state.OutputVideoBitrate is not null)
+            {
+                var bitrate = state.OutputVideoBitrate.Value;
+                var bufsize = (int)Math.Min((long)bitrate * 2, int.MaxValue);
+                param += FormattableString.Invariant($" -maxrate {bitrate} -bufsize {bufsize}");
+            }
+
+            param += " -spatial_aq 1 -temporal_aq 1 -aq-strength 8";
+            if (settings.Multipass is not null)
+            {
+                param += " -multipass " + settings.Multipass;
+            }
+
+            return param;
+        }
+
         private string GetEncoderParam(EncoderPreset? preset, EncoderPreset defaultPreset, EncodingOptions encodingOptions, string videoEncoder, bool isLibX265)
         {
             var param = string.Empty;
@@ -2113,9 +2135,19 @@ namespace MediaBrowser.Controller.MediaEncoding
 
             var isLibX265 = string.Equals(videoEncoder, "libx265", StringComparison.OrdinalIgnoreCase);
             var encodingPreset = encodingOptions.EncoderPreset;
+            var isAnime4KNvenc = IsAnime4KRequested(state, encodingOptions)
+                && (string.Equals(videoEncoder, "h264_nvenc", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(videoEncoder, "hevc_nvenc", StringComparison.OrdinalIgnoreCase));
 
-            param += GetEncoderParam(encodingPreset, defaultPreset, encodingOptions, videoEncoder, isLibX265);
-            param += GetVideoBitrateParam(state, videoEncoder);
+            if (isAnime4KNvenc)
+            {
+                param += GetAnime4KVideoQualityParam(state, encodingOptions);
+            }
+            else
+            {
+                param += GetEncoderParam(encodingPreset, defaultPreset, encodingOptions, videoEncoder, isLibX265);
+                param += GetVideoBitrateParam(state, videoEncoder);
+            }
 
             var framerate = GetFramerateParam(state);
             if (framerate.HasValue)
@@ -2615,6 +2647,13 @@ namespace MediaBrowser.Controller.MediaEncoding
         public int GetVideoBitrateParamValue(BaseEncodingJobOptions request, MediaStream videoStream, string outputVideoCodec)
         {
             var bitrate = request.VideoBitRate;
+
+            // Anime4K uses the requested bitrate as a VBR peak ceiling. Do not scale it down
+            // according to the source bitrate or output codec efficiency.
+            if (bool.TryParse(request.GetOption("anime4k"), out var anime4KEnabled) && anime4KEnabled)
+            {
+                return Math.Min(bitrate ?? 0, int.MaxValue / 2);
+            }
 
             if (videoStream is not null)
             {

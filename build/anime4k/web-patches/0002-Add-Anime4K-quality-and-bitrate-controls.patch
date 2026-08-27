@@ -1,0 +1,338 @@
+From 48a411aab113a5e365f3c4fe445b71fff86403ea Mon Sep 17 00:00:00 2001
+From: Yang Keao <yangkeao@chunibyo.icu>
+Date: Thu, 27 Aug 2026 13:39:33 +0800
+Subject: [PATCH] Add Anime4K quality and bitrate controls
+
+---
+ .../dashboard/routes/playback/transcoding.tsx | 57 ++++++++++++++++++-
+ src/components/playback/playersettingsmenu.js | 31 +++++++++-
+ src/components/qualityOptions.js              | 19 ++++++-
+ src/components/qualityOptions.test.js         | 53 +++++++++++++++++
+ src/strings/en-us.json                        |  7 +++
+ src/strings/zh-cn.json                        |  7 +++
+ 6 files changed, 166 insertions(+), 8 deletions(-)
+ create mode 100644 src/components/qualityOptions.test.js
+
+diff --git a/src/apps/dashboard/routes/playback/transcoding.tsx b/src/apps/dashboard/routes/playback/transcoding.tsx
+index d774a6e..695051c 100644
+--- a/src/apps/dashboard/routes/playback/transcoding.tsx
++++ b/src/apps/dashboard/routes/playback/transcoding.tsx
+@@ -34,6 +34,8 @@ const CONFIG_KEY = 'encoding';
+ 
+ type Anime4KEncodingOptions = EncodingOptions & {
+     EnableAnime4K?: boolean;
++    Anime4KQuality?: 'Balanced' | 'High' | 'Maximum';
++    Anime4KMaxBitrate?: number;
+ };
+ 
+ interface Anime4KStatus {
+@@ -41,6 +43,10 @@ interface Anime4KStatus {
+     Available: boolean;
+     Effective: boolean;
+     Profile: string;
++    Quality: string;
++    ConstantQuality: number;
++    EncoderPreset: string;
++    MaxBitrate: number;
+     ShaderVersion: string;
+     Target: string;
+     Reason: string;
+@@ -113,6 +119,13 @@ export const Component = () => {
+         });
+     }, [ config ]);
+ 
++    const onAnime4KMaxBitrateChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
++        setConfig({
++            ...config,
++            Anime4KMaxBitrate: Number(e.target.value) * 1_000_000
++        });
++    }, [ config ]);
++
+     const onCodecChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+         if (config?.HardwareDecodingCodecs) {
+             if (e.target.checked) {
+@@ -139,9 +152,13 @@ export const Component = () => {
+     const onSubmit = useCallback((e: React.FormEvent<HTMLFormElement>) => {
+         e.preventDefault();
+         if (config) {
++            const anime4KMaxBitrate = Math.min(
++                200_000_000,
++                Math.max(10_000_000, config.Anime4KMaxBitrate || 80_000_000)
++            );
+             setIsAlertOpen(true);
+             submit(
+-                { ...config },
++                { ...config, Anime4KMaxBitrate: anime4KMaxBitrate },
+                 { method: 'post', encType: 'application/json' }
+             );
+         }
+@@ -189,6 +206,13 @@ export const Component = () => {
+         CODECS.filter(codec => codec.types.includes(hardwareAccelType))
+     ), [hardwareAccelType]);
+ 
++    let anime4KStatusSeverity: 'info' | 'warning' | 'success' = 'info';
++    if (anime4KStatus?.Effective) {
++        anime4KStatusSeverity = 'success';
++    } else if (config?.EnableAnime4K) {
++        anime4KStatusSeverity = 'warning';
++    }
++
+     if (isPending || !config) return <Loading />;
+ 
+     return (
+@@ -230,9 +254,36 @@ export const Component = () => {
+                                     }
+                                 />
+                                 <FormHelperText>{globalize.translate('EnableAnime4KHelp')}</FormHelperText>
++                                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mt: 2 }}>
++                                    <TextField
++                                        name='Anime4KQuality'
++                                        select
++                                        disabled={!config.EnableAnime4K}
++                                        label={globalize.translate('Anime4KQuality')}
++                                        value={config.Anime4KQuality ?? 'High'}
++                                        onChange={onConfigChange}
++                                        helperText={globalize.translate('Anime4KQualityHelp')}
++                                        sx={{ minWidth: 220 }}
++                                    >
++                                        <MenuItem value='Balanced'>{globalize.translate('Anime4KQualityBalanced')}</MenuItem>
++                                        <MenuItem value='High'>{globalize.translate('Anime4KQualityHigh')}</MenuItem>
++                                        <MenuItem value='Maximum'>{globalize.translate('Anime4KQualityMaximum')}</MenuItem>
++                                    </TextField>
++                                    <TextField
++                                        name='Anime4KMaxBitrate'
++                                        type='number'
++                                        disabled={!config.EnableAnime4K}
++                                        label={globalize.translate('Anime4KMaxBitrate')}
++                                        value={(config.Anime4KMaxBitrate ?? 80_000_000) / 1_000_000}
++                                        onChange={onAnime4KMaxBitrateChange}
++                                        helperText={globalize.translate('Anime4KMaxBitrateHelp')}
++                                        slotProps={{ htmlInput: { min: 10, max: 200, step: 5 } }}
++                                        sx={{ minWidth: 220 }}
++                                    />
++                                </Stack>
+                                 {anime4KStatus && (
+-                                    <Alert severity={anime4KStatus.Effective ? 'success' : (config.EnableAnime4K ? 'warning' : 'info')}>
+-                                        {anime4KStatus.Reason} ({anime4KStatus.Profile}, {anime4KStatus.Target}, Anime4K {anime4KStatus.ShaderVersion})
++                                    <Alert severity={anime4KStatusSeverity}>
++                                        {anime4KStatus.Reason} ({anime4KStatus.Profile}, {anime4KStatus.Quality}, CQ {anime4KStatus.ConstantQuality}, {anime4KStatus.EncoderPreset}, {anime4KStatus.MaxBitrate / 1_000_000} Mbps, {anime4KStatus.Target}, Anime4K {anime4KStatus.ShaderVersion})
+                                     </Alert>
+                                 )}
+                             </FormControl>
+diff --git a/src/components/playback/playersettingsmenu.js b/src/components/playback/playersettingsmenu.js
+index 12b2488..0cc68e0 100644
+--- a/src/components/playback/playersettingsmenu.js
++++ b/src/components/playback/playersettingsmenu.js
+@@ -4,8 +4,32 @@ import globalize from 'lib/globalize';
+ import { ServerConnections } from 'lib/jellyfin-apiclient';
+ import qualityoptions from '../qualityOptions';
+ 
++function getAnime4KMaxBitrate(mediaSource) {
++    const transcodingUrl = mediaSource?.TranscodingUrl;
++    if (!transcodingUrl) {
++        return null;
++    }
++
++    const query = transcodingUrl.includes('?') ? transcodingUrl.split('?')[1] : '';
++    const values = {};
++    for (const part of query.split('&')) {
++        const separator = part.indexOf('=');
++        if (separator > 0) {
++            values[decodeURIComponent(part.slice(0, separator))] = decodeURIComponent(part.slice(separator + 1));
++        }
++    }
++
++    if (values.anime4k !== 'true') {
++        return null;
++    }
++
++    const maxBitrate = Number(values.anime4kMaxBitrate);
++    return Number.isFinite(maxBitrate) && maxBitrate > 0 ? maxBitrate : null;
++}
++
+ function showQualityMenu(player, btn) {
+-    const videoStream = playbackManager.currentMediaSource(player).MediaStreams.filter(function (stream) {
++    const mediaSource = playbackManager.currentMediaSource(player);
++    const videoStream = mediaSource.MediaStreams.filter(function (stream) {
+         return stream.Type === 'Video';
+     })[0];
+ 
+@@ -17,6 +41,7 @@ function showQualityMenu(player, btn) {
+         isAutomaticBitrateEnabled: playbackManager.enableAutomaticBitrateDetection(player),
+         videoCodec,
+         videoBitRate,
++        maxSelectableBitrate: getAnime4KMaxBitrate(mediaSource),
+         enableAuto: true
+     });
+ 
+@@ -89,7 +114,8 @@ function showRepeatModeMenu(player, btn) {
+ function getQualitySecondaryText(player) {
+     const state = playbackManager.getPlayerState(player);
+ 
+-    const videoStream = playbackManager.currentMediaSource(player).MediaStreams.filter(function (stream) {
++    const mediaSource = playbackManager.currentMediaSource(player);
++    const videoStream = mediaSource.MediaStreams.filter(function (stream) {
+         return stream.Type === 'Video';
+     })[0];
+ 
+@@ -105,6 +131,7 @@ function getQualitySecondaryText(player) {
+         videoBitRate,
+         videoWidth: videoWidth,
+         videoHeight: videoHeight,
++        maxSelectableBitrate: getAnime4KMaxBitrate(mediaSource),
+         enableAuto: true
+     });
+ 
+diff --git a/src/components/qualityOptions.js b/src/components/qualityOptions.js
+index 4520c50..ecfcbe2 100644
+--- a/src/components/qualityOptions.js
++++ b/src/components/qualityOptions.js
+@@ -4,6 +4,7 @@ export function getVideoQualityOptions(options) {
+     const maxStreamingBitrate = options.currentMaxBitrate;
+     const videoBitRate = options.videoBitRate ?? -1;
+     const videoCodec = options.videoCodec;
++    const maxSelectableBitrate = Number(options.maxSelectableBitrate) || 0;
+     let referenceBitRate = videoBitRate;
+ 
+     // Quality options are indexed by bitrate. If you must duplicate them, make sure each of them are unique (by making the last digit a 1)
+@@ -25,6 +26,15 @@ export function getVideoQualityOptions(options) {
+         { name: '420 kbps', maxHeight: 360, bitrate: 420000 }
+     ];
+ 
++    if (maxSelectableBitrate > 0 && !bitrateConfigurations.some(c => c.bitrate === maxSelectableBitrate)) {
++        bitrateConfigurations.push({
++            name: `${maxSelectableBitrate / 1_000_000} Mbps`,
++            maxHeight: 2160,
++            bitrate: maxSelectableBitrate
++        });
++        bitrateConfigurations.sort((a, b) => b.bitrate - a.bitrate);
++    }
++
+     const qualityOptions = [];
+ 
+     const autoQualityOption = {
+@@ -37,7 +47,9 @@ export function getVideoQualityOptions(options) {
+         qualityOptions.push(autoQualityOption);
+     }
+ 
+-    if (videoBitRate > 0 && videoBitRate < bitrateConfigurations[0].bitrate) {
++    if (maxSelectableBitrate > 0) {
++        referenceBitRate = maxSelectableBitrate;
++    } else if (videoBitRate > 0 && videoBitRate < bitrateConfigurations[0].bitrate) {
+         // Slightly increase reference bitrate for high efficiency codecs when it is not too high
+         // Ideally we only need to do this for transcoding to h264, but we need extra api request to get that info which is not ideal for this
+         if (videoCodec && ['hevc', 'av1', 'vp9'].includes(videoCodec) && referenceBitRate <= 20000000) {
+@@ -54,12 +66,13 @@ export function getVideoQualityOptions(options) {
+         }
+     });
+ 
+-    if (maxStreamingBitrate) {
++    const effectiveMaxStreamingBitrate = maxStreamingBitrate || maxSelectableBitrate;
++    if (effectiveMaxStreamingBitrate) {
+         let selectedIndex = qualityOptions.length - 1;
+         for (let i = 0, length = qualityOptions.length; i < length; i++) {
+             const option = qualityOptions[i];
+ 
+-            if (option.bitrate > 0 && option.bitrate <= maxStreamingBitrate) {
++            if (option.bitrate > 0 && option.bitrate <= effectiveMaxStreamingBitrate) {
+                 selectedIndex = i;
+                 break;
+             }
+diff --git a/src/components/qualityOptions.test.js b/src/components/qualityOptions.test.js
+new file mode 100644
+index 0000000..aeb5403
+--- /dev/null
++++ b/src/components/qualityOptions.test.js
+@@ -0,0 +1,53 @@
++import { describe, expect, it, vi } from 'vitest';
++
++import { getVideoQualityOptions } from './qualityOptions';
++
++vi.mock('../lib/globalize', () => ({
++    default: {
++        translate: key => key
++    }
++}));
++
++describe('getVideoQualityOptions', () => {
++    it('keeps normal playback options limited by the source bitrate', () => {
++        const options = getVideoQualityOptions({
++            currentMaxBitrate: 120_000_000,
++            isAutomaticBitrateEnabled: true,
++            videoCodec: 'h264',
++            videoBitRate: 4_000_000,
++            enableAuto: true
++        });
++
++        expect(options.some(option => option.bitrate === 80_000_000)).toBe(false);
++        expect(options.some(option => option.bitrate === 6_000_000)).toBe(true);
++    });
++
++    it('offers Anime4K bitrates up to the configured ceiling', () => {
++        const options = getVideoQualityOptions({
++            currentMaxBitrate: 120_000_000,
++            isAutomaticBitrateEnabled: true,
++            videoCodec: 'h264',
++            videoBitRate: 4_000_000,
++            maxSelectableBitrate: 80_000_000,
++            enableAuto: true
++        });
++
++        expect(options.some(option => option.bitrate === 120_000_000)).toBe(false);
++        expect(options.some(option => option.bitrate === 80_000_000)).toBe(true);
++        expect(options[0]).toMatchObject({ bitrate: 0, selected: true, autoText: '80 Mbps' });
++    });
++
++    it('adds a custom ceiling and preserves a manual lower limit', () => {
++        const options = getVideoQualityOptions({
++            currentMaxBitrate: 20_000_000,
++            isAutomaticBitrateEnabled: false,
++            videoCodec: 'h264',
++            videoBitRate: 4_000_000,
++            maxSelectableBitrate: 100_000_000,
++            enableAuto: true
++        });
++
++        expect(options.some(option => option.name === '100 Mbps' && option.bitrate === 100_000_000)).toBe(true);
++        expect(options.find(option => option.bitrate === 20_000_000)?.selected).toBe(true);
++    });
++});
+diff --git a/src/strings/en-us.json b/src/strings/en-us.json
+index 99b6582..e9d0c5c 100644
+--- a/src/strings/en-us.json
++++ b/src/strings/en-us.json
+@@ -1744,6 +1744,13 @@
+     "PreferFmp4HlsContainerHelp": "Prefer to use fMP4 as the default container for HLS, making it possible to direct stream HEVC and AV1 content on supported devices.",
+     "AllowHevcEncoding": "Allow encoding in HEVC format",
+     "Anime4KUpscaling": "Anime4K upscaling",
++    "Anime4KQuality": "Encoding quality",
++    "Anime4KQualityHelp": "Controls NVENC constant quality, preset, and multipass mode. High is recommended for a GeForce RTX 2070 SUPER.",
++    "Anime4KQualityBalanced": "Balanced (CQ 21, p4)",
++    "Anime4KQualityHigh": "High (CQ 19, p5)",
++    "Anime4KQualityMaximum": "Maximum (CQ 17, p6)",
++    "Anime4KMaxBitrate": "Peak bitrate (Mbps)",
++    "Anime4KMaxBitrateHelp": "VBR peak ceiling for automatic Anime4K sessions. Manual client quality limits and user limits still take precedence.",
+     "LabelAllowedAudioChannels": "Maximum Allowed Audio Channels",
+     "LabelSelectAudioChannels": "Channels",
+     "LabelSelectMono": "Mono",
+diff --git a/src/strings/zh-cn.json b/src/strings/zh-cn.json
+index 82a6902..6de7931 100644
+--- a/src/strings/zh-cn.json
++++ b/src/strings/zh-cn.json
+@@ -1453,6 +1453,13 @@
+     "PreferFmp4HlsContainerHelp": "优先使用 fMP4 作为 HLS 播放的默认容器，从而可以在支持的设备上直接串流 HEVC 和 AV1 格式的内容。",
+     "AllowHevcEncoding": "允许以 HEVC 格式编码",
+     "Anime4KUpscaling": "Anime4K 超分辨率",
++    "Anime4KQuality": "编码质量",
++    "Anime4KQualityHelp": "控制 NVENC 的恒定质量、预设和多遍编码模式。GeForce RTX 2070 SUPER 推荐使用“高”。",
++    "Anime4KQualityBalanced": "均衡（CQ 21，p4）",
++    "Anime4KQualityHigh": "高（CQ 19，p5）",
++    "Anime4KQualityMaximum": "最高（CQ 17，p6）",
++    "Anime4KMaxBitrate": "峰值码率（Mbps）",
++    "Anime4KMaxBitrateHelp": "自动 Anime4K 会话的 VBR 峰值上限。客户端手动选择的画质限制和用户限制仍然优先。",
+     "LabelAllowedAudioChannels": "允许的最大声道数量",
+     "LabelSelectAudioChannels": "声道",
+     "LabelSelectMono": "单声道",
+-- 
+2.55.0
+

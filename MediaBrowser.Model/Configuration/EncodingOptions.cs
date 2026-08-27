@@ -55,6 +55,8 @@ public class EncodingOptions
         EnableIntelLowPowerHevcHwEncoder = false;
         EnableHardwareEncoding = true;
         EnableAnime4K = false;
+        Anime4KQuality = Anime4KQualityProfile.High;
+        Anime4KMaxBitrate = 80_000_000;
         AllowHevcEncoding = false;
         AllowAv1Encoding = false;
         EnableSubtitleExtraction = true;
@@ -276,6 +278,16 @@ public class EncodingOptions
     /// Gets or sets a value indicating whether eligible animation is automatically upscaled with Anime4K.
     /// </summary>
     public bool EnableAnime4K { get; set; }
+
+    /// <summary>
+    /// Gets or sets the Anime4K NVENC quality profile.
+    /// </summary>
+    public Anime4KQualityProfile Anime4KQuality { get; set; }
+
+    /// <summary>
+    /// Gets or sets the maximum Anime4K video bitrate in bits per second.
+    /// </summary>
+    public int Anime4KMaxBitrate { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether HEVC encoding is enabled.

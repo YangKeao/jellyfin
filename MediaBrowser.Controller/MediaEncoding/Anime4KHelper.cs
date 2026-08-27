@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using Jellyfin.Data.Enums;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.MediaInfo;
@@ -14,6 +15,21 @@ namespace MediaBrowser.Controller.MediaEncoding;
 /// </summary>
 public static class Anime4KHelper
 {
+    /// <summary>
+    /// Default maximum Anime4K video bitrate.
+    /// </summary>
+    public const int DefaultMaxBitrate = 80_000_000;
+
+    /// <summary>
+    /// Minimum configurable Anime4K video bitrate.
+    /// </summary>
+    public const int MinMaxBitrate = 10_000_000;
+
+    /// <summary>
+    /// Maximum configurable Anime4K video bitrate.
+    /// </summary>
+    public const int MaxMaxBitrate = 200_000_000;
+
     /// <summary>
     /// The target width boundary.
     /// </summary>
@@ -43,6 +59,52 @@ public static class Anime4KHelper
     /// </summary>
     public static string RuntimeReason
         => Environment.GetEnvironmentVariable("JELLYFIN_ANIME4K_REASON") ?? "Anime4K runtime probe did not run.";
+
+    /// <summary>
+    /// Gets the NVENC settings for an Anime4K quality profile.
+    /// </summary>
+    /// <param name="profile">Configured quality profile.</param>
+    /// <returns>The corresponding encoder settings.</returns>
+    public static Anime4KEncoderSettings GetEncoderSettings(Anime4KQualityProfile profile)
+        => profile switch
+        {
+            Anime4KQualityProfile.Balanced => new(21, "p4", null),
+            Anime4KQualityProfile.Maximum => new(17, "p6", "fullres"),
+            _ => new(19, "p5", "qres")
+        };
+
+    /// <summary>
+    /// Normalizes the configured maximum Anime4K video bitrate.
+    /// </summary>
+    /// <param name="bitrate">Configured bitrate in bits per second.</param>
+    /// <returns>A valid bitrate in bits per second.</returns>
+    public static int NormalizeMaxBitrate(int bitrate)
+    {
+        if (bitrate <= 0)
+        {
+            return DefaultMaxBitrate;
+        }
+
+        return Math.Clamp(bitrate, MinMaxBitrate, MaxMaxBitrate);
+    }
+
+    /// <summary>
+    /// Calculates the Anime4K video bitrate ceiling for a playback session.
+    /// </summary>
+    /// <param name="configuredMaxBitrate">Administrator configured video ceiling.</param>
+    /// <param name="sessionMaxBitrate">Optional client or user total bitrate ceiling.</param>
+    /// <param name="audioBitrate">Optional output audio bitrate.</param>
+    /// <returns>The effective video bitrate ceiling.</returns>
+    public static int GetSessionVideoBitrate(int configuredMaxBitrate, int? sessionMaxBitrate, int? audioBitrate)
+    {
+        var configuredCeiling = NormalizeMaxBitrate(configuredMaxBitrate);
+        if (sessionMaxBitrate is not > 0)
+        {
+            return configuredCeiling;
+        }
+
+        return Math.Max(1, Math.Min(configuredCeiling, sessionMaxBitrate.Value - Math.Max(audioBitrate ?? 0, 0)));
+    }
 
     /// <summary>
     /// Determines whether the item is animation. NoAnime4K always wins and Anime4K forces inclusion.

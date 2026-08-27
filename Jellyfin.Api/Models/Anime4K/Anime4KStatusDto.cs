@@ -26,6 +26,26 @@ public sealed class Anime4KStatusDto
     public string Profile { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets the selected encoding quality profile.
+    /// </summary>
+    public string Quality { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the NVENC constant-quality value.
+    /// </summary>
+    public int ConstantQuality { get; set; }
+
+    /// <summary>
+    /// Gets or sets the NVENC encoder preset.
+    /// </summary>
+    public string EncoderPreset { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the configured maximum video bitrate in bits per second.
+    /// </summary>
+    public int MaxBitrate { get; set; }
+
+    /// <summary>
     /// Gets or sets the bundled Anime4K shader version.
     /// </summary>
     public string ShaderVersion { get; set; } = string.Empty;

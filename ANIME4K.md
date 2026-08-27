@@ -4,7 +4,13 @@ This branch adds server-controlled Anime4K upscaling to Jellyfin 10.11.11. Offic
 
 ## Behavior
 
-The administrator switch is under **Dashboard → Playback → Transcoding → Anime4K upscaling** and defaults to off. Changes apply to new playback sessions.
+The administrator controls are under **Dashboard → Playback → Transcoding → Anime4K upscaling** and default to off. Changes apply to new playback sessions. The quality profiles are:
+
+- **Balanced**: NVENC CQ 21, preset p4, single pass.
+- **High** (default): NVENC CQ 19, preset p5, quarter-resolution multipass.
+- **Maximum**: NVENC CQ 17, preset p6, full-resolution multipass.
+
+All profiles use NVENC HQ-tuned VBR with spatial and temporal adaptive quantization. The peak bitrate defaults to 80 Mbps and can be configured from 10 to 200 Mbps.
 
 Anime4K is applied only when all of these conditions are true:
 
@@ -15,7 +21,11 @@ Anime4K is applied only when all of these conditions are true:
 
 The tag `Anime4K` forces metadata inclusion for titles with missing genres. `NoAnime4K` always wins. Output preserves aspect ratio within 3840×2160 (for example, 4:3 becomes 2880×2160). HDR and Dolby Vision are intentionally bypassed.
 
-The video path is NVDEC → system memory → Vulkan/libplacebo Anime4K → subtitle composition → CUDA upload → NVENC. H.264 is capped at 35 Mbps and HEVC at 20 Mbps while respecting lower client/user limits. Version 1 supports one Anime4K stream at a time through the Kubernetes GPU limit.
+The video path is NVDEC → system memory → Vulkan/libplacebo Anime4K → subtitle composition → CUDA upload → NVENC. The configured peak is a ceiling rather than a target: CQ lets simple frames use fewer bits while preserving detail in complex frames. A session uses the smaller of the administrator ceiling and the client/user total bitrate limit (after reserving the audio bitrate). A manually selected lower quality such as 20 Mbps therefore remains a hard session limit.
+
+The web quality menu recognizes Anime4K sessions from the server-generated transcoding URL and offers rates up to the administrator ceiling instead of limiting the list to the source bitrate. With the default configuration, automatic quality displays 80 Mbps even when the source is around 4 Mbps.
+
+The Kubernetes deployment exposes the NVIDIA runtime and driver capabilities without requesting an exclusive `nvidia.com/gpu` resource. Jellyfin, Immich, and other workloads can therefore share the RTX 2070 SUPER; concurrent load is managed cooperatively rather than through hard GPU isolation.
 
 ## Build
 
@@ -23,7 +33,7 @@ The video path is NVDEC → system memory → Vulkan/libplacebo Anime4K → subt
 docker buildx build \
   --platform linux/amd64 \
   --file Dockerfile.anime4k \
-  --tag ghcr.io/yangkeao/anime4k-jellyfin:10.11.11-2 \
+  --tag ghcr.io/yangkeao/anime4k-jellyfin:10.11.11-3 \
   .
 ```
 
@@ -31,7 +41,7 @@ The image pins Jellyfin 10.11.11, Jellyfin Web 10.11.11, and Anime4K 4.0.1. It i
 
 ## Runtime status
 
-Administrators can query `GET /System/Anime4K/Status`. `Effective` is true only when configuration, NVENC, shader files, NVIDIA graphics libraries, Vulkan, and libplacebo are ready. A failed startup probe leaves normal Jellyfin playback untouched.
+Administrators can query `GET /System/Anime4K/Status`. `Effective` is true only when configuration, NVENC, shader files, NVIDIA graphics libraries, Vulkan, and libplacebo are ready. The response also reports the selected quality, CQ, NVENC preset, and normalized peak bitrate. A failed startup probe leaves normal Jellyfin playback untouched.
 
 ## Rollback
 

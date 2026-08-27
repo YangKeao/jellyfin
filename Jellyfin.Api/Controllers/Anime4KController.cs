@@ -40,6 +40,7 @@ public class Anime4KController : BaseJellyfinApiController
         var available = Anime4KHelper.IsRuntimeAvailable;
         var nvenc = options.HardwareAccelerationType == HardwareAccelerationType.nvenc;
         var effective = options.EnableAnime4K && available && nvenc;
+        var encoderSettings = Anime4KHelper.GetEncoderSettings(options.Anime4KQuality);
 
         var reason = !options.EnableAnime4K
             ? "Disabled in transcoding settings."
@@ -55,6 +56,10 @@ public class Anime4KController : BaseJellyfinApiController
             Available = available,
             Effective = effective,
             Profile = "Mode A (Fast)",
+            Quality = options.Anime4KQuality.ToString(),
+            ConstantQuality = encoderSettings.ConstantQuality,
+            EncoderPreset = encoderSettings.Preset,
+            MaxBitrate = Anime4KHelper.NormalizeMaxBitrate(options.Anime4KMaxBitrate),
             ShaderVersion = "4.0.1",
             Target = $"{Anime4KHelper.TargetWidth}x{Anime4KHelper.TargetHeight} boundary",
             Reason = reason
